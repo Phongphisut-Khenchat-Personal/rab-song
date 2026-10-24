@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rabsong
+      POSTGRES_PASSWORD: rabsong_dev
+      POSTGRES_DB: rabsong
+    ports:
+      - "5436:5432"
+    volumes:
+      - rabsong_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rabsong -d rabsong"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rabsong
+      POSTGRES_PASSWORD: rabsong_test
+      POSTGRES_DB: rabsong_test
+    ports:
+      - "5437:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rabsong -d rabsong_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  rabsong_pg:
