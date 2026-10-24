@@ -1,6 +1,8 @@
+# ฐานเดิมที่สร้างด้วย postgres:16-alpine อยู่ใน volume ชื่อ rabsong_pg
+# ไฟล์นี้ไม่ mount volume นั้น และไม่ลบมัน ฐานใหม่ใช้ rabsong_postgis
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: rabsong
       POSTGRES_PASSWORD: rabsong_dev
@@ -8,7 +10,7 @@ services:
     ports:
       - "5436:5432"
     volumes:
-      - rabsong_pg:/var/lib/postgresql/data
+      - rabsong_postgis:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rabsong -d rabsong"]
       interval: 5s
@@ -16,7 +18,7 @@ services:
       retries: 20
 
   postgres_test:
-    image: postgres:16-alpine
+    image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: rabsong
       POSTGRES_PASSWORD: rabsong_test
@@ -32,4 +34,4 @@ services:
       retries: 20
 
 volumes:
-  rabsong_pg:
+  rabsong_postgis:

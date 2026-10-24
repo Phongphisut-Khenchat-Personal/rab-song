@@ -11,6 +11,19 @@ export async function resetDb(): Promise<void> {
   resetLoginLimiter();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "StudentTripEvent",
+      "VehicleInspection",
+      "RunStopSnapshot",
+      "RouteVersionStop",
+      "RouteVersion",
+      "RouteImpact",
+      "ServiceException",
+      "AuthorizedPickupPerson",
+      "Place",
+      "ServiceSurvey",
+      "ServiceAgreement",
+      "ServiceLead",
+      "OperatingPolicy",
       "SyncInbox",
       "AuditLog",
       "Notification",

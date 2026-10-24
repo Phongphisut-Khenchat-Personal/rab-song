@@ -12,9 +12,23 @@ export type UserRole = "OWNER" | "DRIVER" | "GUARDIAN";
 export type CheckpointKind = "ARRIVED_SCHOOL" | "LEFT_SCHOOL" | "RUN_FINISHED";
 
 export function roleLabel(role: UserRole): string {
-  if (role === "OWNER") return "เจ้าของกิจการ";
-  if (role === "DRIVER") return "คนขับ";
-  return "ผู้ปกครอง";
+  if (role === "GUARDIAN") return "ผู้ปกครอง";
+  return "คนขับ";
+}
+
+export function invoiceStatusLabel(status: string): string {
+  if (status === "UNPAID") return "ยังไม่จ่าย";
+  if (status === "PARTIAL") return "จ่ายบางส่วน";
+  if (status === "PAID") return "จ่ายแล้ว";
+  if (status === "WAIVED") return "ยกเว้น";
+  return status;
+}
+
+export function absenceStatusLabel(status: string): string {
+  if (status === "SUBMITTED") return "รอรับทราบ";
+  if (status === "ACKNOWLEDGED") return "รับทราบแล้ว";
+  if (status === "CANCELLED") return "ยกเลิกแล้ว";
+  return status;
 }
 
 export function periodLabel(period: RunPeriod): string {

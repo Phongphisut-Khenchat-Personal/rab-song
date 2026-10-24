@@ -17,7 +17,7 @@ export default async function StudentsPage() {
           {students.map((student) => (
             <li className="card" key={student.id}>
               <strong>{student.displayName}</strong> ({student.nickname}) · {student.schoolName}
-              <div className="muted">{student.active ? "ใช้งาน" : "ปิดใช้งาน"} · ฉุกเฉิน {student.emergencyContactName}</div>
+              <div className="muted">{student.serviceStatus} · {student.active ? "ใช้งาน" : "ปิดใช้งาน"} · ฉุกเฉิน {student.emergencyContactName}</div>
               <Link className="btn" href={`/owner/students/${student.id}`}>แก้ไข</Link>
             </li>
           ))}

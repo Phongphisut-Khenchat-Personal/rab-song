@@ -1,6 +1,6 @@
 import { Shell } from "@/components/shell";
 import { requirePageActor } from "@/lib/current";
-import { actionLabel, type AttendanceEventType, type RunPeriod } from "@/lib/labels";
+import { actionLabel, invoiceStatusLabel, type AttendanceEventType, type RunPeriod } from "@/lib/labels";
 import { formatThaiDateTime } from "@/lib/time";
 import { listInvoices } from "@/server/payments";
 import { getGuardianHistory } from "@/server/runs";
@@ -32,7 +32,7 @@ export default async function HistoryPage() {
           <ul className="list">
             {invoices.map((invoice) => (
               <li key={invoice.id}>
-                {invoice.studentName} · {invoice.yearMonth} · {invoice.amountLabel} · คงเหลือ {invoice.remainingLabel} · {invoice.status}
+                {invoice.studentName} · {invoice.yearMonth} · {invoice.amountLabel} · คงเหลือ {invoice.remainingLabel} · {invoiceStatusLabel(invoice.status)}
               </li>
             ))}
           </ul>

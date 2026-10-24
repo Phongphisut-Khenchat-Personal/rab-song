@@ -10,5 +10,6 @@ coverage
 .env.production
 .DS_Store
 Thumbs.db
+backups/
 prisma/*.db
 prisma/*.db-journal

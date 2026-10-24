@@ -11,7 +11,7 @@ export function Connectivity() {
 
   async function refresh() {
     const items = await browserQueue.list().catch(() => []);
-    setQueued(items.filter((item) => !item.confirmed && item.state !== "rejected").length);
+    setQueued(items.filter((item) => (item.syncStatus ?? (item.confirmed ? "SYNCED" : "PENDING")) !== "SYNCED").length);
     setForced(forcedOffline());
   }
 
@@ -40,13 +40,17 @@ export function Connectivity() {
 
   const offline = !online || forced;
   return (
-    <div className={offline ? "banner warn" : "banner ok"} role="status">
-      <div className="screen" style={{ paddingTop: 10, paddingBottom: 10 }}>
-        {offline
-          ? "ออฟไลน์ — รายการที่กดได้จะอยู่ในคิว และจะยังไม่ขึ้นว่าบันทึกแล้ว"
-          : "ออนไลน์ — สถานะบันทึกสำเร็จจะขึ้นเมื่อเซิร์ฟเวอร์ยืนยันแล้วเท่านั้น"}
-        {queued > 0 ? <div>รอซิงก์ {queued} รายการ</div> : null}
-        {dev ? (
+    <>
+      {offline || queued > 0 ? (
+        <div className={offline ? "net bad" : "net warn"} role="status">
+          <div className="screen">
+            {offline ? "ออฟไลน์ รายการที่กดจะรอส่ง และยังไม่ถือว่าบันทึกแล้ว" : `มี ${queued} รายการที่ยังไม่ได้รับการยืนยัน`}
+          </div>
+        </div>
+      ) : null}
+      {dev ? (
+        <details className="dev-net">
+          <summary>ทดสอบออฟไลน์</summary>
           <label className="check">
             <input
               type="checkbox"
@@ -58,10 +62,10 @@ export function Connectivity() {
                 if (!event.target.checked) void flushBrowserQueue().then(refresh);
               }}
             />
-            จำลองออฟไลน์สำหรับพัฒนา
+            เปิดโหมดออฟไลน์
           </label>
-        ) : null}
-      </div>
-    </div>
+        </details>
+      ) : null}
+    </>
   );
 }

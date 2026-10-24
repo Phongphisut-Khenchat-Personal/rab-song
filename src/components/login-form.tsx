@@ -1,7 +1,9 @@
 "use client";
 
+import { Bus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { homeForRole } from "@/lib/home";
 
 type Account = { role: string; phone: string; password: string };
@@ -23,10 +25,13 @@ export function LoginForm() {
   }, []);
 
   return (
-    <main className="screen">
+    <main className="screen gate">
       <div className="card stack">
-        <h1>รับส่ง</h1>
-        <p className="muted">เข้าสู่ระบบด้วยเบอร์โทรที่เจ้าของกิจการลงทะเบียนไว้</p>
+        <div className="login-mark" aria-hidden="true"><Bus size={32} /></div>
+        <div>
+          <p className="kicker">รถรับส่งนักเรียน</p>
+          <h1>รับส่ง</h1>
+        </div>
         <form
           className="stack"
           onSubmit={async (event) => {
@@ -46,9 +51,12 @@ export function LoginForm() {
                 router.refresh();
                 return;
               }
-              setMessage(body.error?.message ?? "เข้าสู่ระบบไม่สำเร็จ");
+              const text = body.error?.message ?? "เข้าสู่ระบบไม่สำเร็จ";
+              setMessage(text);
+              toast.error(text);
             } catch {
               setMessage("ติดต่อเซิร์ฟเวอร์ไม่ได้ ยังไม่ได้เข้าสู่ระบบ");
+              toast.error("ติดต่อเซิร์ฟเวอร์ไม่ได้");
             } finally {
               setPending(false);
             }
@@ -68,24 +76,20 @@ export function LoginForm() {
         </form>
         {message ? <div className="banner bad" role="alert">{message}</div> : null}
         {accounts.length > 0 ? (
-          <div className="banner info">
-            <strong>บัญชีตัวอย่างสำหรับพัฒนาเท่านั้น</strong>
-            <ul>
-              {accounts.map((account) => (
-                <li key={account.phone}>
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => {
-                      setPhone(account.phone);
-                      setPassword(account.password);
-                    }}
-                  >
-                    {account.role} {account.phone}
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <div className="chips">
+            {accounts.map((account) => (
+              <button
+                key={account.phone}
+                type="button"
+                className="chip btn"
+                onClick={() => {
+                  setPhone(account.phone);
+                  setPassword(account.password);
+                }}
+              >
+                {account.role}
+              </button>
+            ))}
           </div>
         ) : null}
       </div>

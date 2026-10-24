@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { AssignmentForm, StudentForm } from "@/components/owner-forms";
+import { ReceiverForm, ServiceActions } from "@/components/workflow-forms";
 import { Shell } from "@/components/shell";
 import { requirePageActor } from "@/lib/current";
 import { listRoutes, listSchools, listStudents } from "@/server/roster";
@@ -19,6 +20,8 @@ export default async function EditStudentPage({ params }: { params: Promise<{ st
           initial={student}
         />
         <AssignmentForm studentId={student.id} routes={routes} />
+        <ReceiverForm studentId={student.id} />
+        <ServiceActions studentId={student.id} serviceStatus={student.serviceStatus} />
       </div>
     </Shell>
   );

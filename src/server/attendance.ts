@@ -1,4 +1,4 @@
-import type { AttendanceEventType, Prisma, StudentRunStatus } from "@prisma/client";
+import type { AttendanceEventType, Prisma, StudentRunStatus, TripDisposition } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { actionLabel, studentDisplayName, type RunPeriod } from "@/lib/labels";
 import { requireRun } from "@/server/access";
@@ -6,6 +6,7 @@ import { writeAudit } from "@/server/audit";
 import type { Actor } from "@/server/auth";
 import { DomainError, isUniqueViolation } from "@/server/errors";
 import { guardianUserIds, notifyUsers, type NotificationReceipt } from "@/server/notifications";
+import { assertAuthorizedReceiver } from "@/server/receivers";
 
 type Rule = {
   from: StudentRunStatus[];
@@ -112,6 +113,12 @@ async function writeEvent(
   }
 
   const nextStatus = input.rule.to ?? state.status;
+  const disposition = await dispositionFor(tx, {
+    eventType: input.eventType,
+    studentId: input.studentId,
+    period: run.schedule.period as RunPeriod,
+    alternateReceiverName: input.alternateReceiverName,
+  });
   const event = await tx.attendanceEvent.create({
     data: {
       runId: input.runId,
@@ -130,6 +137,7 @@ async function writeEvent(
     where: { id: state.id },
     data: {
       status: nextStatus,
+      ...(disposition ? { disposition } : {}),
       alternateReceiverName: input.alternateReceiverName ?? state.alternateReceiverName,
     },
   });
@@ -158,7 +166,7 @@ async function writeEvent(
         body: `${studentDisplayName(state.student)}: ${actionLabel(input.eventType, period)}`,
         sourceEventId: event.id,
       })
-    : { inApp: "not_applicable" as const, push: "not_configured" as const };
+    : { inApp: "not_applicable" as const, push: "not_configured" as const, sms: "not_configured" as const };
 
   return {
     ok: true,
@@ -206,8 +214,30 @@ function replay(
     notification: {
       inApp: rule?.notify ? "recorded" : "not_applicable",
       push: "not_configured",
+      sms: "not_configured",
     },
   };
+}
+
+async function dispositionFor(
+  tx: Prisma.TransactionClient,
+  input: {
+    eventType: Exclude<AttendanceEventType, "CORRECTION">;
+    studentId: string;
+    period: RunPeriod;
+    alternateReceiverName: string | null;
+  },
+): Promise<TripDisposition | null> {
+  if (input.eventType === "BOARD") return "BOARDED";
+  if (input.eventType === "NO_SHOW") return "NOT_PRESENT";
+  if (input.eventType === "EXCUSE") return "ABSENCE_CONFIRMED";
+  if (input.eventType === "DELAY") return null;
+  if (input.eventType === "ALIGHT" && input.period === "MORNING") return "DROPPED_OFF";
+  if (!input.alternateReceiverName) {
+    throw new DomainError(422, "AUTHORIZED_RECEIVER_REQUIRED", "รอบนี้ต้องระบุผู้รับที่ได้รับอนุญาต ระบบจะไม่ปล่อยเด็กเอง");
+  }
+  await assertAuthorizedReceiver(tx, input.studentId, input.alternateReceiverName);
+  return "HANDED_TO_AUTHORIZED_PERSON";
 }
 
 function toData(event: {
@@ -269,7 +299,10 @@ export async function correctAttendance(input: {
         recordedByUserId: input.actor.userId,
       },
     });
-    await tx.studentRunState.update({ where: { id: state.id }, data: { status: input.toStatus } });
+    await tx.studentRunState.update({
+      where: { id: state.id },
+      data: { status: input.toStatus, disposition: dispositionFromStatus(input.toStatus) },
+    });
     await tx.scheduleRun.update({
       where: { id: input.runId },
       data: { status: "IN_PROGRESS", completedAt: null },
@@ -287,9 +320,17 @@ export async function correctAttendance(input: {
       confirmed: true,
       replayed: false,
       data: toData(event),
-      notification: { inApp: "not_applicable", push: "not_configured" },
+      notification: { inApp: "not_applicable", push: "not_configured", sms: "not_configured" },
     };
   });
+}
+
+function dispositionFromStatus(status: StudentRunStatus): TripDisposition {
+  if (status === "BOARDED") return "BOARDED";
+  if (status === "ALIGHTED") return "DROPPED_OFF";
+  if (status === "NO_SHOW") return "NOT_PRESENT";
+  if (status === "EXCUSED") return "ABSENCE_CONFIRMED";
+  return "UNKNOWN";
 }
 
 function cleanText(

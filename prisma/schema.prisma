@@ -91,6 +91,85 @@ enum SyncOperationStatus {
   REJECTED
 }
 
+enum LeadStatus {
+  LEAD
+  SURVEY_SCHEDULED
+  LOCATION_PENDING_VERIFICATION
+  ROUTE_ASSESSMENT
+  QUOTE_PENDING
+  AGREEMENT_PENDING
+  REGISTRATION_PENDING
+  SCHEDULE_PENDING
+  READY_FOR_SERVICE
+  ACTIVE
+  REJECTED
+  CANCELLED
+  SUSPENDED
+}
+
+enum StudentServiceStatus {
+  DRAFT
+  NEEDS_VERIFICATION
+  VERIFIED
+  ACTIVE
+  SUSPENDED
+  ENDED
+}
+
+enum LocationStatus {
+  UNVERIFIED
+  PARENT_CONFIRMED
+  FIELD_VERIFIED
+  REJECTED
+  NEEDS_RECHECK
+}
+
+enum CoordinateSource {
+  MANUAL_ENTRY
+  MAP_PIN
+  GEOCODER
+}
+
+enum AgreementStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum RouteVersionStatus {
+  DRAFT
+  LOCKED
+  PUBLISHED
+  SUPERSEDED
+}
+
+enum EstimateStatus {
+  UNAVAILABLE
+  ESTIMATED
+}
+
+enum ServiceExceptionKind {
+  HOLIDAY
+  SCHOOL_TIME_CHANGE
+  VEHICLE_UNAVAILABLE
+  DRIVER_UNAVAILABLE
+}
+
+enum InspectionKind {
+  PRE_TRIP
+  EMPTY_SWEEP
+}
+
+enum TripDisposition {
+  NOT_PRESENT
+  ABSENCE_CONFIRMED
+  NOT_BOARDED
+  BOARDED
+  DROPPED_OFF
+  HANDED_TO_AUTHORIZED_PERSON
+  UNKNOWN
+}
+
 model User {
   id           String         @id @default(cuid())
   phone        String         @unique
@@ -104,7 +183,12 @@ model User {
   guardian     Guardian?
   sessions     Session[]
   notifications Notification[]
-  auditLogs    AuditLog[]
+  auditLogs     AuditLog[]
+  leadsCreated  ServiceLead[]       @relation("LeadCreator")
+  placesVerified Place[]            @relation("PlaceVerifier")
+  exceptionsCreated ServiceException[] @relation("ExceptionCreator")
+  inspections   VehicleInspection[] @relation("InspectionActor")
+  impacts       RouteImpact[]       @relation("ImpactActor")
 }
 
 model Session {
@@ -176,6 +260,13 @@ model Student {
   emergencyContactName  String
   emergencyContactPhone String
   allergyNote           String?
+  gradeLevel            String?
+  serviceStart          DateTime?                @db.Date
+  serviceEnd            DateTime?                @db.Date
+  serviceStatus         StudentServiceStatus     @default(ACTIVE)
+  consentAt             DateTime?
+  usesMorning           Boolean                  @default(true)
+  usesEvening           Boolean                  @default(true)
   active                Boolean                  @default(true)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
@@ -185,7 +276,10 @@ model Student {
   runStates             StudentRunState[]
   events                AttendanceEvent[]
   absences              AbsenceRequest[]
+  tripEvents         StudentTripEvent[]
   invoices              Invoice[]
+  authorizedReceivers   AuthorizedPickupPerson[]
+  lead                  ServiceLead?
 }
 
 model StudentGuardian {
@@ -212,6 +306,8 @@ model Route {
   stops       RouteStop[]
   schedules   Schedule[]
   assignments StudentRouteAssignment[]
+  versions    RouteVersion[]
+  impacts     RouteImpact[]
 }
 
 model RouteStop {
@@ -225,6 +321,7 @@ model RouteStop {
   route              Route                    @relation(fields: [routeId], references: [id], onDelete: Cascade)
   pickupAssignments  StudentRouteAssignment[] @relation("PickupStop")
   dropoffAssignments StudentRouteAssignment[] @relation("DropoffStop")
+  place              Place?
 
   @@unique([routeId, sequence])
 }
@@ -276,6 +373,9 @@ model ScheduleRun {
   states      StudentRunState[]
   events      AttendanceEvent[]
   checkpoints RunCheckpoint[]
+  snapshots   RunStopSnapshot[]
+  inspections VehicleInspection[]
+  tripEvents  StudentTripEvent[]
 
   @@unique([scheduleId, serviceDate])
   @@index([serviceDate])
@@ -286,6 +386,9 @@ model StudentRunState {
   runId                 String
   studentId             String
   status                StudentRunStatus @default(WAITING)
+  disposition           TripDisposition  @default(UNKNOWN)
+  pickupStopId          String?
+  dropoffStopId         String?
   alternateReceiverName String?
   updatedAt             DateTime         @updatedAt
   run                   ScheduleRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -324,6 +427,7 @@ model AbsenceRequest {
   affectsEvening  Boolean       @default(true)
   status          AbsenceStatus @default(SUBMITTED)
   idempotencyKey  String        @unique
+  late            Boolean       @default(false)
   createdByUserId String
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -419,4 +523,207 @@ model SyncInbox {
   clientCreatedAt DateTime?
   createdAt       DateTime            @default(now())
   appliedAt       DateTime?
+}
+
+model ServiceLead {
+  id              String     @id @default(cuid())
+  guardianName    String
+  phone           String
+  childNickname   String
+  schoolName      String
+  status          LeadStatus @default(LEAD)
+  note            String?
+  assessmentNote  String?
+  rejectionReason String?
+  quotedSatang    Int?
+  scheduledAt     DateTime?
+  studentId       String?    @unique
+  createdByUserId String
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  createdBy       User       @relation("LeadCreator", fields: [createdByUserId], references: [id])
+  student         Student?   @relation(fields: [studentId], references: [id])
+  surveys         ServiceSurvey[]
+  place           Place?
+  agreement       ServiceAgreement?
+
+  @@index([status])
+}
+
+model ServiceSurvey {
+  id          String      @id @default(cuid())
+  leadId      String
+  scheduledAt DateTime
+  note        String?
+  createdAt   DateTime    @default(now())
+  lead        ServiceLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+}
+
+model ServiceAgreement {
+  id           String          @id @default(cuid())
+  leadId       String          @unique
+  quotedSatang Int
+  note         String?
+  status       AgreementStatus @default(PENDING)
+  acceptedAt   DateTime?
+  createdAt    DateTime        @default(now())
+  lead         ServiceLead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model Place {
+  id                String           @id @default(cuid())
+  label             String
+  addressLine       String
+  directionNote     String?
+  entranceNote      String?
+  parkingNote       String?
+  landmark          String?
+  cautionNote       String?
+  latitude          Decimal?         @db.Decimal(9, 6)
+  longitude         Decimal?         @db.Decimal(9, 6)
+  geog              Unsupported("geography(Point,4326)")?
+  coordinateSource  CoordinateSource @default(MANUAL_ENTRY)
+  status            LocationStatus   @default(UNVERIFIED)
+  checkNote         String?
+  verifiedByUserId  String?
+  verifiedAt        DateTime?
+  leadId            String?          @unique
+  routeStopId       String?          @unique
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  verifiedBy        User?            @relation("PlaceVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  lead              ServiceLead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  routeStop         RouteStop?       @relation(fields: [routeStopId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model AuthorizedPickupPerson {
+  id           String   @id @default(cuid())
+  studentId    String
+  name         String
+  relationship String
+  phone        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, active])
+}
+
+model RouteVersion {
+  id                      String             @id @default(cuid())
+  routeId                 String
+  number                  Int
+  status                  RouteVersionStatus @default(DRAFT)
+  schoolDeadline          String
+  dwellSeconds            Int                @default(60)
+  estimateStatus          EstimateStatus     @default(UNAVAILABLE)
+  distanceMeters          Int?
+  durationSeconds         Int?
+  estimateNote            String?
+  acceptUnverifiedTiming  Boolean            @default(false)
+  lockedAt                DateTime?
+  publishedAt             DateTime?
+  createdAt               DateTime           @default(now())
+  route                   Route              @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  stops                   RouteVersionStop[]
+
+  @@unique([routeId, number])
+  @@index([routeId, status])
+}
+
+model RouteVersionStop {
+  id          String       @id @default(cuid())
+  versionId   String
+  routeStopId String
+  sequence    Int
+  version     RouteVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, sequence])
+  @@unique([versionId, routeStopId])
+}
+
+model RouteImpact {
+  id               String   @id @default(cuid())
+  routeId          String
+  reason           String
+  unchangedRunIds  Json
+  actorUserId      String
+  createdAt        DateTime @default(now())
+  route            Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  actor            User     @relation("ImpactActor", fields: [actorUserId], references: [id])
+
+  @@index([routeId, createdAt])
+}
+
+model RunStopSnapshot {
+  id          String      @id @default(cuid())
+  runId       String
+  routeStopId String
+  sequence    Int
+  name        String
+  run         ScheduleRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId])
+}
+
+model ServiceException {
+  id              String               @id @default(cuid())
+  serviceDate     DateTime             @db.Date
+  kind            ServiceExceptionKind
+  affectsMorning  Boolean              @default(true)
+  affectsEvening  Boolean              @default(true)
+  note            String
+  createdByUserId String
+  createdAt       DateTime             @default(now())
+  createdBy       User                 @relation("ExceptionCreator", fields: [createdByUserId], references: [id])
+
+  @@unique([serviceDate, kind])
+}
+
+model VehicleInspection {
+  id               String         @id @default(cuid())
+  runId            String
+  kind             InspectionKind
+  items            Json
+  passed           Boolean
+  idempotencyKey   String         @unique
+  note             String?
+  checkedByUserId  String
+  checkedAt        DateTime       @default(now())
+  run              ScheduleRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  checkedBy        User           @relation("InspectionActor", fields: [checkedByUserId], references: [id])
+
+  @@index([runId, kind])
+}
+
+model StudentTripEvent {
+  id                   String          @id @default(cuid())
+  runId                String
+  studentId            String
+  disposition          TripDisposition
+  idempotencyKey       String          @unique
+  note                 String?
+  receiverName         String?
+  previousDisposition  TripDisposition?
+  nextDisposition      TripDisposition
+  recordedByUserId     String
+  recordedAt           DateTime        @default(now())
+  clientRecordedAt     DateTime?
+  run                  ScheduleRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  student              Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([runId, studentId])
+}
+
+model OperatingPolicy {
+  id                        String   @id @default("default")
+  absenceCutoffTime         String   @default("21:00")
+  noShowContactInstruction  String
+  noReceiverInstruction     String
+  updatedAt                 DateTime @updatedAt
 }

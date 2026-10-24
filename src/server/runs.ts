@@ -1,16 +1,12 @@
 import { prisma } from "@/lib/db";
-import {
-  allowedDriverActions,
-  periodLabel,
-  statusLabel,
-  studentDisplayName,
-  type RunPeriod,
-  type StudentRunStatus,
-} from "@/lib/labels";
+import { actionLabel, allowedDriverActions, periodLabel, statusLabel, studentDisplayName, type RunPeriod, type StudentRunStatus } from "@/lib/labels";
+import { guardianMoment, type GuardianStatus } from "@/lib/guardian-view";
 import { bangkokDayOfWeek, bangkokYmd, dateFromYmd } from "@/lib/time";
 import { requireRun, type LoadedRun } from "@/server/access";
 import type { Actor } from "@/server/auth";
 import { DomainError, isUniqueViolation } from "@/server/errors";
+import { getOperatingPolicy } from "@/server/policy";
+import { copySnapshots } from "@/server/route-versions";
 
 export async function ensureRunsForDate(ymd = bangkokYmd()): Promise<void> {
   const serviceDate = dateFromYmd(ymd);
@@ -20,16 +16,29 @@ export async function ensureRunsForDate(ymd = bangkokYmd()): Promise<void> {
       route: {
         include: {
           vehicle: true,
+          stops: { orderBy: { sequence: "asc" as const } },
           assignments: {
-            where: { active: true, student: { active: true } },
-            select: { studentId: true },
+            where: { active: true, student: { active: true, serviceStatus: "ACTIVE" } },
+            select: { studentId: true, pickupStopId: true, dropoffStopId: true },
           },
         },
       },
     },
   });
 
+  const exceptions = await prisma.serviceException.findMany({ where: { serviceDate } });
+
   for (const schedule of schedules) {
+    const blocked = exceptions.some((item) => (schedule.period === "MORNING" ? item.affectsMorning : item.affectsEvening));
+    const existing = await prisma.scheduleRun.findUnique({
+      where: { scheduleId_serviceDate: { scheduleId: schedule.id, serviceDate } },
+    });
+    if (blocked) {
+      if (existing?.status === "PLANNED") {
+        await prisma.scheduleRun.update({ where: { id: existing.id }, data: { status: "CANCELLED" } });
+      }
+      continue;
+    }
     const studentIds = schedule.route.assignments.map((assignment) => assignment.studentId);
     const absences = await prisma.absenceRequest.findMany({
       where: {
@@ -64,17 +73,22 @@ export async function ensureRunsForDate(ymd = bangkokYmd()): Promise<void> {
     }
     for (const studentId of studentIds) {
       try {
+        const assignment = schedule.route.assignments.find((item) => item.studentId === studentId);
         await prisma.studentRunState.create({
           data: {
             runId: run.id,
             studentId,
             status: excused.has(studentId) ? "EXCUSED" : "WAITING",
+            disposition: excused.has(studentId) ? "ABSENCE_CONFIRMED" : "UNKNOWN",
+            pickupStopId: assignment?.pickupStopId,
+            dropoffStopId: assignment?.dropoffStopId,
           },
         });
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
       }
     }
+    await prisma.$transaction((tx) => copySnapshots(tx, run.id, schedule.routeId));
   }
 }
 
@@ -89,6 +103,7 @@ export async function getDriverToday(actor: Actor, ymd = bangkokYmd()) {
     include: {
       schedule: { include: { route: { include: { vehicle: true } } } },
       states: true,
+      checkpoints: true,
     },
   });
   return runs
@@ -101,6 +116,10 @@ export async function getDriverToday(actor: Actor, ymd = bangkokYmd()) {
       vehiclePlate: run.schedule.route.vehicle.plateNumber,
       status: run.status,
       counts: countStatuses(run.states.map((state) => state.status)),
+      checkpoints: {
+        arrivedSchool: run.checkpoints.some((item) => item.kind === "ARRIVED_SCHOOL" && item.passed),
+        leftSchool: run.checkpoints.some((item) => item.kind === "LEFT_SCHOOL" && item.passed),
+      },
     }))
     .sort((a, b) => a.period.localeCompare(b.period) * -1);
 }
@@ -108,7 +127,17 @@ export async function getDriverToday(actor: Actor, ymd = bangkokYmd()) {
 export async function getRunDetail(actor: Actor, runId: string) {
   await ensureRunsForDate();
   const run = await requireRun(actor, runId);
-  return serializeRun(run);
+  const [view, policy, inspections] = await Promise.all([
+    serializeRun(run),
+    getOperatingPolicy(),
+    prisma.vehicleInspection.findMany({ where: { runId, passed: true }, select: { kind: true } }),
+  ]);
+  const kinds = new Set(inspections.map((item) => item.kind));
+  return {
+    ...view,
+    instructions: policy,
+    checks: { preTrip: kinds.has("PRE_TRIP"), sweep: kinds.has("EMPTY_SWEEP") },
+  };
 }
 
 function serializeRun(run: LoadedRun) {
@@ -119,27 +148,35 @@ function serializeRun(run: LoadedRun) {
   return loadAssignments(run, period, assignments);
 }
 
-async function loadAssignments(run: LoadedRun, period: RunPeriod, _stops: Map<string, LoadedRun["schedule"]["route"]["stops"][number]>) {
-  const assignments = await prisma.studentRouteAssignment.findMany({
-    where: { routeId: run.schedule.routeId, active: true },
-    include: { pickupStop: true, dropoffStop: true },
-  });
+async function loadAssignments(run: LoadedRun, period: RunPeriod, stops: Map<string, LoadedRun["schedule"]["route"]["stops"][number]>) {
+  const [assignments, snapshots] = await Promise.all([
+    prisma.studentRouteAssignment.findMany({
+      where: { routeId: run.schedule.routeId, active: true },
+      include: { pickupStop: true, dropoffStop: true },
+    }),
+    prisma.runStopSnapshot.findMany({ where: { runId: run.id } }),
+  ]);
   const assignmentByStudent = new Map(assignments.map((assignment) => [assignment.studentId, assignment]));
+  const snapshotByStop = new Map(snapshots.map((snapshot) => [snapshot.routeStopId, snapshot]));
   const students = run.states
     .map((state) => {
       const assignment = assignmentByStudent.get(state.studentId);
-      const stop = period === "MORNING" ? assignment?.pickupStop : assignment?.dropoffStop;
+      const liveStop = period === "MORNING" ? assignment?.pickupStop : assignment?.dropoffStop;
+      const frozenId = period === "MORNING" ? state.pickupStopId : state.dropoffStopId;
+      const resolvedStop = (frozenId ? stops.get(frozenId) : undefined) ?? liveStop;
+      const frozen = frozenId ? snapshotByStop.get(frozenId) : undefined;
       return {
         id: state.student.id,
         displayName: studentDisplayName(state.student),
         nickname: state.student.nickname,
         status: state.status,
+        disposition: state.disposition,
         statusLabel: statusLabel(state.status, period),
-        stopName: stop?.name ?? "ยังไม่กำหนดจุด",
-        sequence: stop?.sequence ?? 999,
-        address: stop?.address ?? "",
-        latitude: coord(stop?.latitude),
-        longitude: coord(stop?.longitude),
+        stopName: frozen?.name ?? resolvedStop?.name ?? "ยังไม่กำหนดจุด",
+        sequence: frozen?.sequence ?? resolvedStop?.sequence ?? 999,
+        address: resolvedStop?.address ?? "",
+        latitude: coord(resolvedStop?.latitude),
+        longitude: coord(resolvedStop?.longitude),
         emergencyContactName: state.student.emergencyContactName,
         emergencyContactPhone: state.student.emergencyContactPhone,
         allergyNote: state.student.allergyNote,
@@ -158,6 +195,8 @@ async function loadAssignments(run: LoadedRun, period: RunPeriod, _stops: Map<st
     status: run.status,
     routeName: run.schedule.route.name,
     schoolName: run.schedule.route.school.name,
+    schoolLatitude: coord(run.schedule.route.school.latitude),
+    schoolLongitude: coord(run.schedule.route.school.longitude),
     vehiclePlate: run.schedule.route.vehicle.plateNumber,
     driverName: run.driver.user.name,
     driverPhone: run.driver.user.phone,
@@ -178,8 +217,9 @@ export async function getGuardianToday(actor: Actor, ymd = bangkokYmd()) {
     where: { guardianId: actor.guardianId },
     include: { student: { include: { school: true } } },
   });
+  const ownIds = links.map((link) => link.studentId);
   const states = await prisma.studentRunState.findMany({
-    where: { studentId: { in: links.map((link) => link.studentId) }, run: { serviceDate: dateFromYmd(ymd) } },
+    where: { studentId: { in: ownIds }, run: { serviceDate: dateFromYmd(ymd) } },
     include: {
       run: {
         include: {
@@ -187,16 +227,30 @@ export async function getGuardianToday(actor: Actor, ymd = bangkokYmd()) {
           driver: { include: { user: true } },
         },
       },
-      student: true,
     },
   });
-  const vehicleIds = new Set<string>();
-  const schedules = await prisma.schedule.findMany({
-    where: { id: { in: states.map((state) => state.run.scheduleId) } },
-    include: { route: { include: { vehicle: true } } },
-  });
+  const runIds = [...new Set(states.map((state) => state.runId))];
+  const scheduleIds = [...new Set(states.map((state) => state.run.scheduleId))];
+  const [roster, schedules, versions] = await Promise.all([
+    prisma.studentRunState.findMany({
+      where: { runId: { in: runIds } },
+      select: { runId: true, studentId: true, status: true, pickupStopId: true, dropoffStopId: true },
+    }),
+    prisma.schedule.findMany({
+      where: { id: { in: scheduleIds } },
+      include: { route: { include: { vehicle: true, stops: { select: { id: true, sequence: true } } } } },
+    }),
+    prisma.routeVersion.findMany({
+      where: { status: "PUBLISHED", estimateStatus: "ESTIMATED", route: { schedules: { some: { id: { in: scheduleIds } } } } },
+      orderBy: { publishedAt: "desc" },
+      select: { routeId: true, durationSeconds: true },
+    }),
+  ]);
   const scheduleById = new Map(schedules.map((schedule) => [schedule.id, schedule]));
-  for (const schedule of schedules) vehicleIds.add(schedule.route.vehicleId);
+  const durationByRoute = new Map<string, number | null>();
+  for (const version of versions) {
+    if (!durationByRoute.has(version.routeId)) durationByRoute.set(version.routeId, version.durationSeconds);
+  }
 
   return links.map((link) => {
     const own = states.filter((state) => state.studentId === link.studentId);
@@ -204,10 +258,30 @@ export async function getGuardianToday(actor: Actor, ymd = bangkokYmd()) {
       const state = own.find((item) => item.run.schedule.period === period);
       if (!state) return null;
       const schedule = scheduleById.get(state.run.scheduleId);
+      const sequence = new Map((schedule?.route.stops ?? []).map((stop) => [stop.id, stop.sequence]));
+      const mine = sequence.get((period === "MORNING" ? state.pickupStopId : state.dropoffStopId) ?? "") ?? 0;
+      const peers = roster.filter((item) => item.runId === state.runId && item.studentId !== state.studentId);
+      const othersRemaining = peers.filter((item) => {
+        const stopId = period === "MORNING" ? item.pickupStopId : item.dropoffStopId;
+        const order = sequence.get(stopId ?? "") ?? 0;
+        if (period === "MORNING" && state.status === "BOARDED") return item.status === "WAITING" && order > mine;
+        if (period === "MORNING" && state.status === "WAITING") return item.status === "WAITING" && order < mine;
+        if (period === "EVENING" && state.status === "BOARDED") return item.status === "BOARDED" && order < mine;
+        return false;
+      }).length;
+      const moment = guardianMoment({
+        period,
+        status: state.status as GuardianStatus,
+        runStatus: state.run.status,
+        othersRemaining,
+        plannedStart: state.run.schedule.plannedStartTime,
+        durationSeconds: state.status === "BOARDED" ? durationByRoute.get(schedule?.routeId ?? "") ?? null : null,
+      });
       return {
         runId: state.runId,
         status: state.status,
-        statusLabel: statusLabel(state.status, period),
+        headline: moment.headline,
+        note: moment.note,
         driverName: state.run.driver.user.name,
         driverPhone: state.run.driver.user.phone,
         vehiclePlate: schedule?.route.vehicle.plateNumber ?? "",
@@ -303,7 +377,7 @@ export async function getOwnerSummary(actor: Actor, ymd = bangkokYmd()) {
       id: event.id,
       studentName: studentDisplayName(event.student),
       periodLabel: periodLabel(event.run.schedule.period),
-      eventType: event.eventType,
+      eventType: actionLabel(event.eventType, event.run.schedule.period),
       note: event.note,
       recordedAt: event.recordedAt.toISOString(),
     })),

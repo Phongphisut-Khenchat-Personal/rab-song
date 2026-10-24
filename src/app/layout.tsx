@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { PhoneToaster } from "@/components/phone-toaster";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +10,20 @@ export const metadata: Metadata = {
   applicationName: "รับส่ง",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#ff6a00",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="th">
-      <body>{children}</body>
+      <body>
+        {children}
+        <PhoneToaster />
+      </body>
     </html>
   );
 }

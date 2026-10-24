@@ -1,6 +1,7 @@
 import { InvoiceForms } from "@/components/owner-forms";
 import { Shell } from "@/components/shell";
 import { requirePageActor } from "@/lib/current";
+import { invoiceStatusLabel } from "@/lib/labels";
 import { listInvoices } from "@/server/payments";
 import { listStudents } from "@/server/roster";
 
@@ -16,7 +17,7 @@ export default async function PaymentsPage() {
           {invoices.map((invoice) => (
             <li className="card" key={invoice.id}>
               <strong>{invoice.studentName}</strong> · {invoice.yearMonth}
-              <div>{invoice.amountLabel} · คงเหลือ {invoice.remainingLabel} · {invoice.status}</div>
+              <div>{invoice.amountLabel} · คงเหลือ {invoice.remainingLabel} · {invoiceStatusLabel(invoice.status)}</div>
               <div className="muted">รหัสยอด {invoice.id}</div>
             </li>
           ))}

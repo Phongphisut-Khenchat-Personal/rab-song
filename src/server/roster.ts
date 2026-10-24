@@ -4,6 +4,7 @@ import { studentDisplayName } from "@/lib/labels";
 import { writeAudit } from "@/server/audit";
 import type { Actor } from "@/server/auth";
 import { DomainError, isUniqueViolation } from "@/server/errors";
+import { recordRouteImpact, refreshPlannedSnapshots } from "@/server/route-versions";
 
 function ownerOnly(actor: Actor): void {
   if (actor.role !== "OWNER") throw new DomainError(403, "FORBIDDEN", "ไม่มีสิทธิ์");
@@ -37,7 +38,7 @@ export async function createStudent(actor: Actor, input: Parameters<typeof stude
   ownerOnly(actor);
   const data = studentData(input);
   const student = await prisma.$transaction(async (tx) => {
-    const created = await tx.student.create({ data });
+    const created = await tx.student.create({ data: { ...data, serviceStatus: "DRAFT" } });
     await writeAudit(tx, {
       actorUserId: actor.userId,
       action: "STUDENT_CREATED",
@@ -107,6 +108,7 @@ export async function listStudents(actor: Actor) {
     emergencyContactName: student.emergencyContactName,
     emergencyContactPhone: student.emergencyContactPhone,
     allergyNote: student.allergyNote,
+    serviceStatus: student.serviceStatus,
     active: student.active,
     guardians: student.guardians.map((link) => ({
       id: link.guardianId,
@@ -205,6 +207,27 @@ export async function addStop(actor: Actor, routeId: string, input: { name: stri
   return { id: stop.id, sequence: stop.sequence };
 }
 
+export async function updateStopLocation(actor: Actor, routeId: string, stopId: string, input: { latitude: number; longitude: number }) {
+  ownerOnly(actor);
+  const stop = await prisma.routeStop.findFirst({ where: { id: stopId, routeId } });
+  if (!stop) throw new DomainError(404, "NOT_FOUND", "ไม่พบจุดนี้");
+  await prisma.$transaction(async (tx) => {
+    await tx.routeStop.update({
+      where: { id: stop.id },
+      data: { latitude: input.latitude, longitude: input.longitude },
+    });
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      action: "STOP_LOCATION",
+      entityType: "RouteStop",
+      entityId: stop.id,
+      previous: { latitude: stop.latitude?.toString() ?? null, longitude: stop.longitude?.toString() ?? null },
+      next: { latitude: input.latitude, longitude: input.longitude },
+    });
+  });
+  return { ok: true as const, confirmed: true as const };
+}
+
 export async function moveStop(actor: Actor, routeId: string, stopId: string, direction: -1 | 1) {
   ownerOnly(actor);
   const stops = await prisma.routeStop.findMany({ where: { routeId }, orderBy: { sequence: "asc" } });
@@ -228,6 +251,8 @@ export async function moveStop(actor: Actor, routeId: string, stopId: string, di
       next: { stopId: current.id, sequence: other.sequence },
     });
   });
+  await refreshPlannedSnapshots(routeId);
+  await recordRouteImpact(actor, routeId, "STOP_REORDERED");
   return { ok: true as const, confirmed: true as const };
 }
 
@@ -264,6 +289,7 @@ export async function assignStudent(
       next: { studentId: input.studentId, routeId: input.routeId, pickupStopId: input.pickupStopId, dropoffStopId: input.dropoffStopId },
     }),
   );
+  await recordRouteImpact(actor, input.routeId, "ASSIGNMENT_CHANGED");
   return { id: saved.id };
 }
 

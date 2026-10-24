@@ -21,6 +21,9 @@ async function main() {
   console.log(`ใช้ฐานพัฒนา ${database.host}${database.pathname}`);
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "StudentTripEvent", "VehicleInspection", "RunStopSnapshot", "RouteVersionStop",
+      "RouteVersion", "RouteImpact", "ServiceException", "AuthorizedPickupPerson",
+      "Place", "ServiceSurvey", "ServiceAgreement", "ServiceLead", "OperatingPolicy",
       "SyncInbox", "AuditLog", "Notification", "Payment", "Invoice",
       "RunCheckpoint", "AttendanceEvent", "StudentRunState", "AbsenceRequest",
       "ScheduleRun", "Schedule", "StudentRouteAssignment", "RouteStop", "Route",
@@ -32,7 +35,7 @@ async function main() {
   const ownerHash = await hashPassword("DevOwner#2569");
   const guardianHash = await hashPassword("DevGuard#2569");
   const owner = await prisma.user.create({
-    data: { phone: "0800000001", name: "ผู้ประกอบการ ตัวอย่าง", passwordHash: ownerHash, role: "OWNER" },
+    data: { phone: "0800000001", name: "คนขับ ตัวอย่าง", passwordHash: ownerHash, role: "OWNER" },
   });
   const driver = await prisma.driver.create({ data: { userId: owner.id } });
   const guardianUserA = await prisma.user.create({
@@ -78,6 +81,10 @@ async function main() {
         emergencyContactName: kid.key === "a" ? "ผู้ปกครอง ตัวอย่าง ก" : "ผู้ปกครอง ตัวอย่าง ข",
         emergencyContactPhone: `080000010${index + 1}`,
         allergyNote: kid.allergy,
+        serviceStatus: "ACTIVE",
+        gradeLevel: "ป.1",
+        consentAt: new Date(),
+        serviceStart: dateFromYmd(bangkokYmd()),
       },
     });
     await prisma.studentGuardian.create({
@@ -86,6 +93,14 @@ async function main() {
         guardianId: kid.key === "a" ? guardianA.id : guardianB.id,
         relationship: "ผู้ปกครอง",
         isPrimary: true,
+      },
+    });
+    await prisma.authorizedPickupPerson.create({
+      data: {
+        studentId: student.id,
+        name: kid.key === "a" ? "ผู้ปกครอง ตัวอย่าง ก" : "ผู้ปกครอง ตัวอย่าง ข",
+        relationship: "ผู้ปกครอง",
+        phone: kid.key === "a" ? "0800000002" : "0800000003",
       },
     });
     const morningPickup = morningStops[kid.stop - 1];
@@ -130,7 +145,9 @@ async function main() {
   });
   const students = await prisma.student.findMany();
   for (const student of students) {
-    await prisma.studentRunState.create({ data: { runId: run.id, studentId: student.id, status: "ALIGHTED" } });
+    await prisma.studentRunState.create({
+      data: { runId: run.id, studentId: student.id, status: "ALIGHTED", disposition: "DROPPED_OFF" },
+    });
     await prisma.attendanceEvent.create({
       data: {
         runId: run.id,
@@ -172,6 +189,24 @@ async function main() {
       recordedByUserId: owner.id,
       idempotencyKey: "seed-payment-partial",
       note: "ข้อมูลตัวอย่าง",
+    },
+  });
+  await prisma.serviceLead.create({
+    data: {
+      guardianName: "ผู้สนใจ ตัวอย่าง",
+      phone: "0800000099",
+      childNickname: "น้องยังไม่ลงทะเบียน",
+      schoolName: "โรงเรียนตัวอย่างพัฒนาการ",
+      status: "LEAD",
+      note: "ข้อมูลตัวอย่าง ไม่ใช่ลูกค้าจริง และยังไม่ใช่นักเรียนในรอบรถ",
+      createdByUserId: owner.id,
+    },
+  });
+  await prisma.operatingPolicy.create({
+    data: {
+      id: "default",
+      noShowContactInstruction: "โทรหาผู้ปกครองตามเบอร์ฉุกเฉิน แล้วรอคำสั่งจากคนขับ ห้ามปล่อยเด็กไว้ตามลำพัง",
+      noReceiverInstruction: "ถ้าไม่มีผู้รับที่ได้รับอนุญาต ให้อยู่กับเด็กบนรถและโทรหาคนขับ ห้ามปล่อยเด็กไว้ตามลำพัง",
     },
   });
   console.log("ใส่ข้อมูลตัวอย่างสำหรับพัฒนาแล้ว ไม่ใช่ข้อมูลเด็กจริง");

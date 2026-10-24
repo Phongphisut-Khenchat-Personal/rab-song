@@ -1,4 +1,6 @@
 import { MoveStopButton, StopForm, VehicleForm } from "@/components/owner-forms";
+import { StopPins } from "@/components/stop-pins";
+import { PublishForm } from "@/components/workflow-forms";
 import { Shell } from "@/components/shell";
 import { requirePageActor } from "@/lib/current";
 import { periodLabel, type RunPeriod } from "@/lib/labels";
@@ -35,7 +37,9 @@ export default async function RoutesPage() {
                 </li>
               ))}
             </ul>
+            <StopPins routeId={route.id} stops={route.stops} />
             <StopForm routeId={route.id} />
+            <PublishForm routeId={route.id} />
             <div>
               {route.schedules.map((schedule) => (
                 <div key={schedule.id}>{days[schedule.dayOfWeek]} {periodLabel(schedule.period as RunPeriod)} {schedule.plannedStartTime}</div>

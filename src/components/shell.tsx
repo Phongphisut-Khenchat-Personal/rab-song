@@ -1,28 +1,39 @@
+import { Bell } from "lucide-react";
 import type { Actor } from "@/server/auth";
-import { roleLabel } from "@/lib/labels";
 import { BottomNav } from "@/components/bottom-nav";
 import { Connectivity } from "@/components/connectivity";
 import { LogoutButton } from "@/components/logout-button";
 
-export function Shell({ actor, wide = false, children }: { actor: Actor; wide?: boolean; children: React.ReactNode }) {
+export function Shell({
+  actor,
+  wide = false,
+  alertCount = 0,
+  children,
+}: {
+  actor: Actor;
+  wide?: boolean;
+  alertCount?: number;
+  children: React.ReactNode;
+}) {
   return (
     <>
       <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            รับส่ง
-            <small>รถรับส่งนักเรียน</small>
-          </div>
+        <div className={wide ? "topbar-inner wide" : "topbar-inner"}>
+          <div className="brand">รับส่ง</div>
           <div className="who">
-            <div>{actor.name}</div>
-            <div>{roleLabel(actor.role)}</div>
+            {alertCount > 0 ? (
+              <a className="bell" href="#alerts" aria-label={`แจ้งเตือน ${alertCount} รายการ`}>
+                <Bell size={20} aria-hidden="true" />
+                <b>{alertCount > 9 ? "9+" : alertCount}</b>
+              </a>
+            ) : null}
             <LogoutButton />
           </div>
         </div>
       </header>
       <Connectivity />
       <main className={wide ? "screen wide" : "screen"}>{children}</main>
-      <BottomNav role={actor.role} />
+      <BottomNav role={actor.role} wide={wide} />
     </>
   );
 }

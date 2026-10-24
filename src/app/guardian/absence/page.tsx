@@ -1,7 +1,7 @@
 import { AbsenceForm } from "@/components/absence-form";
 import { Shell } from "@/components/shell";
 import { requirePageActor } from "@/lib/current";
-import { studentDisplayName } from "@/lib/labels";
+import { absenceStatusLabel, studentDisplayName } from "@/lib/labels";
 import { prisma } from "@/lib/db";
 import { listAbsences } from "@/server/absence";
 
@@ -26,7 +26,7 @@ export default async function AbsencePage() {
           <ul className="list">
             {absences.map((absence) => (
               <li key={absence.id}>
-                {absence.studentName} · {absence.startDate} ถึง {absence.endDate} · {absence.reason} · {absence.status}
+                {absence.studentName} · {absence.startDate} ถึง {absence.endDate} · {absence.reason} · {absenceStatusLabel(absence.status)}
               </li>
             ))}
           </ul>

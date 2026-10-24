@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { bangkokYmd } from "@/lib/time";
 import { submitOrQueue } from "@/lib/submit";
 
@@ -21,6 +22,11 @@ export function AbsenceForm({
   const [message, setMessage] = useState("");
   const [tone, setTone] = useState<"ok" | "warn" | "bad">("warn");
   const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!message) return;
+    const show = tone === "ok" ? toast.success : tone === "bad" ? toast.error : toast.warning;
+    show(message, { id: "absence" });
+  }, [message, tone]);
 
   return (
     <form

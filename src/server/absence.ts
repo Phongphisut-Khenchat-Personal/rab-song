@@ -1,12 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { studentDisplayName } from "@/lib/labels";
+import { submittedAfterCutoff } from "@/lib/cutoff";
 import { bangkokYmd, dateFromYmd, eachDate } from "@/lib/time";
 import { assertCanSeeStudent } from "@/server/access";
 import { writeAudit } from "@/server/audit";
 import type { Actor } from "@/server/auth";
 import { DomainError, isUniqueViolation } from "@/server/errors";
 import { notifyUsers, type NotificationReceipt } from "@/server/notifications";
+import { getOperatingPolicy } from "@/server/policy";
 import { ensureRunsForDate } from "@/server/runs";
 
 export type AbsenceResult = {
@@ -55,7 +57,7 @@ export async function createAbsence(
       confirmed: true,
       replayed: true,
       data: { id: existing.id, status: existing.status, unchangedRunIds: [] },
-      notification: { inApp: "recorded", push: "not_configured" },
+      notification: { inApp: "recorded", push: "not_configured", sms: "not_configured" },
     };
   }
 
@@ -72,6 +74,8 @@ export async function createAbsence(
   if (overlap) throw new DomainError(409, "ABSENCE_OVERLAP", "มีคำขอหยุดที่ทับวันที่นี้อยู่แล้ว");
 
   const guardian = await resolveGuardian(actor, input.studentId);
+  const policy = await getOperatingPolicy();
+  const late = submittedAfterCutoff(input.startDate, policy.absenceCutoffTime);
   for (const ymd of eachDate(input.startDate, input.endDate)) {
     await ensureRunsForDate(ymd);
   }
@@ -88,6 +92,7 @@ export async function createAbsence(
           affectsMorning: input.affectsMorning,
           affectsEvening: input.affectsEvening,
           idempotencyKey: input.idempotencyKey,
+          late,
           createdByUserId: actor.userId,
         },
       });
@@ -108,12 +113,15 @@ export async function createAbsence(
         const state = run.states[0];
         if (!periodMatches || !state) continue;
         driverUserIds.push(run.driver.userId);
-        if (state.status === "BOARDED" || state.status === "ALIGHTED") {
+        if (state.status === "BOARDED" || state.status === "ALIGHTED" || run.status === "IN_PROGRESS") {
           unchangedRunIds.push(run.id);
           continue;
         }
         if (state.status === "EXCUSED") continue;
-        await tx.studentRunState.update({ where: { id: state.id }, data: { status: "EXCUSED" } });
+        await tx.studentRunState.update({
+          where: { id: state.id },
+          data: { status: "EXCUSED", disposition: "ABSENCE_CONFIRMED" },
+        });
         try {
           await tx.attendanceEvent.create({
             data: {
@@ -180,7 +188,7 @@ export async function createAbsence(
       confirmed: true,
       replayed: true,
       data: { id: raced.id, status: raced.status, unchangedRunIds: [] },
-      notification: { inApp: "recorded", push: "not_configured" },
+      notification: { inApp: "recorded", push: "not_configured", sms: "not_configured" },
     };
   }
 }

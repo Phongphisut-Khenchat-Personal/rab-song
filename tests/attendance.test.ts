@@ -3,6 +3,7 @@ import { POST as events } from "@/app/api/runs/[runId]/events/route";
 import { POST as checkpoints } from "@/app/api/runs/[runId]/checkpoints/route";
 import { prisma } from "@/lib/db";
 import { recordAttendance } from "@/server/attendance";
+import { recordInspection as saveInspection } from "@/server/inspections";
 import { DomainError } from "@/server/errors";
 import { attendanceBody } from "@/server/validators";
 import { toActor } from "@/server/auth";
@@ -37,7 +38,7 @@ describe("attendance", () => {
     });
     expect(first.confirmed).toBe(true);
     expect(first.replayed).toBe(false);
-    expect(first.notification).toEqual({ inApp: "recorded", push: "not_configured" });
+    expect(first.notification).toEqual({ inApp: "recorded", push: "not_configured", sms: "not_configured" });
     expect(replay.replayed).toBe(true);
     expect(new Date(first.data.recordedAt).getFullYear()).toBe(new Date().getFullYear());
     expect(await prisma.attendanceEvent.count()).toBe(1);
@@ -129,6 +130,8 @@ describe("attendance", () => {
       idempotencyKey: crypto.randomUUID(),
     });
     const school = await recordCheckpoint(driver, fixture.run.id, "ARRIVED_SCHOOL");
+    await recordInspection(driver, fixture.run.id, "PRE_TRIP");
+    await recordInspection(driver, fixture.run.id, "EMPTY_SWEEP");
     const done = await recordCheckpoint(driver, fixture.run.id, "RUN_FINISHED");
     expect(school.confirmed).toBe(true);
     expect(done.confirmed).toBe(true);
@@ -139,4 +142,15 @@ describe("attendance", () => {
 async function recordCheckpoint(actor: Parameters<typeof import("@/server/checkpoints").recordCheckpoint>[0], runId: string, kind: "ARRIVED_SCHOOL" | "RUN_FINISHED") {
   const { recordCheckpoint: check } = await import("@/server/checkpoints");
   return check(actor, runId, kind);
+}
+
+async function recordInspection(
+  actor: Parameters<typeof import("@/server/inspections").recordInspection>[0],
+  runId: string,
+  kind: "PRE_TRIP" | "EMPTY_SWEEP",
+) {
+  const items = kind === "PRE_TRIP"
+    ? { driverReady: true, vehicleReady: true, rosterReviewed: true }
+    : { aisle: true, seats: true, floor: true, rearDoor: true };
+  return saveInspection(actor, { runId, kind, items, idempotencyKey: crypto.randomUUID() });
 }

@@ -8,21 +8,23 @@ function item(key = "11111111-1111-4111-8111-111111111111"): QueueItem {
     operationType: "ATTENDANCE",
     url: "/api/sync",
     payload: { studentId: "s" },
-    state: "queued",
+    syncStatus: "PENDING",
     confirmed: false,
     clientCreatedAt: "2026-10-24T01:00:00.000Z",
   };
 }
 
 function memoryStore(initial: QueueItem[] = []): QueueStore & { items: QueueItem[] } {
-  const store = { items: initial };
+  const box = { items: initial };
   return {
-    ...store,
+    get items() {
+      return box.items;
+    },
     async list() {
-      return store.items;
+      return box.items;
     },
     async save(items) {
-      store.items = items;
+      box.items = items;
     },
   };
 }
@@ -44,8 +46,8 @@ describe("offline queue", () => {
   it("does not mark a retry or a rejection as confirmed", () => {
     const queued = item();
     expect(applyReceipt(queued, { ok: true, retryable: true }).confirmed).toBe(false);
-    expect(applyReceipt(queued, { ok: false, error: { message: "ซ้ำ" } }).state).toBe("rejected");
-    expect(applyReceipt(queued, { ok: true, confirmed: true }).confirmed).toBe(true);
+    expect(applyReceipt(queued, { ok: false, error: { message: "ซ้ำ" } }).syncStatus).toBe("FAILED");
+    expect(applyReceipt(queued, { ok: true, confirmed: true }).syncStatus).toBe("SYNCED");
   });
 
   it("leaves the item queued when the network request throws", async () => {
@@ -55,6 +57,7 @@ describe("offline queue", () => {
     });
     expect(result[0].confirmed).toBe(false);
     expect(result[0].state).toBe("queued");
+    expect(result[0].syncStatus).toBe("PENDING");
   });
 
   it("confirms only after the sender returns a confirmed receipt", async () => {
@@ -65,5 +68,18 @@ describe("offline queue", () => {
       throw new Error("should not send a confirmed item");
     });
     expect(again[0].confirmed).toBe(true);
+  });
+
+  it("shows SYNCING before the server answers and SYNCED only after confirmation", async () => {
+    const store = memoryStore([item()]);
+    let during = "";
+    const result = await flushQueue(store, async () => {
+      during = store.items[0].syncStatus;
+      return { ok: true, confirmed: true };
+    });
+    expect(during).toBe("SYNCING");
+    expect(during).not.toBe("SYNCED");
+    expect(result[0].syncStatus).toBe("SYNCED");
+    expect(result[0].confirmed).toBe(true);
   });
 });

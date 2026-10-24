@@ -5,6 +5,7 @@ import { GET as students } from "@/app/api/students/route";
 import { GET as audit } from "@/app/api/audit/route";
 import { POST as events } from "@/app/api/runs/[runId]/events/route";
 import { GET as invoices } from "@/app/api/invoices/route";
+import { prisma } from "@/lib/db";
 import { api, cookieFrom, createFixture, PASSWORD, resetDb } from "./helpers";
 
 async function session(phone: string): Promise<string> {
@@ -28,6 +29,49 @@ describe("permissions", () => {
     expect(JSON.stringify(body)).not.toContain("สอง");
     expect(JSON.stringify(body)).not.toContain("แพ้ทดสอบ");
     expect(JSON.stringify(body)).not.toContain("passwordHash");
+    expect(body.children[0].morning.headline).toBe("รอรับ");
+    expect(body.children[0].morning.note).toBeNull();
+  });
+
+  it("counts later pickups without naming the other child or inventing a clock time", async () => {
+    const fixture = await createFixture();
+    const later = await prisma.routeStop.create({
+      data: { routeId: fixture.route.id, name: "จุดถัดไป", sequence: 3, address: "ซอยถัดไป" },
+    });
+    await prisma.studentRouteAssignment.updateMany({
+      where: { studentId: fixture.student2.id },
+      data: { pickupStopId: later.id },
+    });
+    await prisma.studentRunState.update({
+      where: { runId_studentId: { runId: fixture.run.id, studentId: fixture.student2.id } },
+      data: { pickupStopId: later.id, status: "WAITING" },
+    });
+    await prisma.studentRunState.update({
+      where: { runId_studentId: { runId: fixture.run.id, studentId: fixture.student1.id } },
+      data: { status: "BOARDED" },
+    });
+    await prisma.scheduleRun.update({ where: { id: fixture.run.id }, data: { status: "IN_PROGRESS" } });
+    const withoutTime = await guardianToday(api("/api/guardian/today", { cookie: await session(fixture.guardianAUser.phone) }));
+    const plain = await withoutTime.json();
+    expect(plain.children[0].morning.note).toBe("อีก 1 คนก่อนถึงโรงเรียน");
+    expect(JSON.stringify(plain)).not.toContain("สอง");
+    expect(JSON.stringify(plain)).not.toContain("จุดถัดไป");
+
+    await prisma.routeVersion.create({
+      data: {
+        routeId: fixture.route.id,
+        number: 1,
+        status: "PUBLISHED",
+        schoolDeadline: "07:30",
+        estimateStatus: "ESTIMATED",
+        durationSeconds: 45 * 60,
+        publishedAt: new Date(),
+      },
+    });
+    const withTime = await guardianToday(api("/api/guardian/today", { cookie: await session(fixture.guardianAUser.phone) }));
+    const timed = await withTime.json();
+    expect(timed.children[0].morning.note).toBe("อีก 1 คนก่อนถึงโรงเรียน · คาดว่าถึงประมาณ 07:15 ไม่รับประกันเวลา");
+    expect(JSON.stringify(timed)).not.toContain("สอง");
   });
 
   it("hides owner records and another family's attendance from a guardian", async () => {

@@ -25,7 +25,7 @@ export async function submitOrQueue(input: {
   if (offline) {
     const items = await browserQueue.list();
     await browserQueue.save(enqueue(items, queuedItem));
-    return { kind: "queued", message: "อยู่ในคิวบนเครื่องนี้ ยังไม่ได้บันทึกบนเซิร์ฟเวอร์" };
+    return { kind: "queued", message: "อยู่ในคิว สถานะ PENDING ยังไม่ได้บันทึกบนเซิร์ฟเวอร์" };
   }
   try {
     const response = await fetch(input.url, {
@@ -43,7 +43,7 @@ export async function submitOrQueue(input: {
     try {
       const items = await browserQueue.list();
       await browserQueue.save(enqueue(items, queuedItem));
-      return { kind: "queued", message: "ส่งไม่ถึงเซิร์ฟเวอร์ เก็บในคิวแล้ว ยังไม่ได้ยืนยัน" };
+      return { kind: "queued", message: "ส่งไม่ถึงเซิร์ฟเวอร์ สถานะ PENDING ยังไม่ใช่ SYNCED" };
     } catch {
       return { kind: "unknown", message: "ส่งไม่สำเร็จและเก็บคิวไม่ได้ ยังไม่ได้ยืนยันการบันทึก" };
     }

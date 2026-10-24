@@ -11,6 +11,13 @@ export type MutationReceipt = {
   error?: { code?: string; message?: string };
 };
 
+export function pushStatusLabel(push: string | null | undefined): string {
+  if (push === "SENT") return "พุชส่งแล้ว";
+  if (push === "FAILED") return "พุชส่งไม่สำเร็จ";
+  if (push === "PENDING" || push === "RECORDED") return "พุชยังไม่ได้รับการยืนยัน";
+  return "พุชยังไม่ได้ตั้งค่า";
+}
+
 export function canShowConfirmed(receipt: MutationReceipt | null | undefined): boolean {
   return receipt?.ok === true && receipt.confirmed === true;
 }

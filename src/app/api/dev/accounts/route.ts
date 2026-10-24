@@ -1,5 +1,5 @@
 const accounts = [
-  { role: "เจ้าของกิจการและคนขับ", phone: "0800000001", password: "DevOwner#2569" },
+  { role: "คนขับ", phone: "0800000001", password: "DevOwner#2569" },
   { role: "ผู้ปกครอง ก", phone: "0800000002", password: "DevGuard#2569" },
   { role: "ผู้ปกครอง ข", phone: "0800000003", password: "DevGuard#2569" },
 ];

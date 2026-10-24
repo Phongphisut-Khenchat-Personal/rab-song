@@ -1,5 +1,6 @@
 "use client";
 
+import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -9,8 +10,9 @@ export function LogoutButton() {
 
   return (
     <button
-      className="ghost"
+      className="icon-btn"
       type="button"
+      aria-label="ออกจากระบบ"
       disabled={pending}
       onClick={async () => {
         setPending(true);
@@ -19,7 +21,7 @@ export function LogoutButton() {
         router.refresh();
       }}
     >
-      ออกจากระบบ
+      <LogOut size={18} aria-hidden="true" />
     </button>
   );
 }
