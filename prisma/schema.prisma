@@ -1,0 +1,422 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  DRIVER
+  GUARDIAN
+}
+
+enum RunPeriod {
+  MORNING
+  EVENING
+}
+
+enum RunStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum StudentRunStatus {
+  WAITING
+  BOARDED
+  ALIGHTED
+  NO_SHOW
+  EXCUSED
+}
+
+enum AttendanceEventType {
+  BOARD
+  ALIGHT
+  NO_SHOW
+  EXCUSE
+  DELAY
+  ALTERNATE_RECEIVER
+  CORRECTION
+}
+
+enum AbsenceStatus {
+  SUBMITTED
+  ACKNOWLEDGED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  WAIVED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  OTHER
+}
+
+enum NotificationChannel {
+  IN_APP
+  WEB_PUSH
+}
+
+enum NotificationDelivery {
+  PENDING
+  RECORDED
+  SENT
+  NOT_CONFIGURED
+  FAILED
+}
+
+enum CheckpointKind {
+  ARRIVED_SCHOOL
+  LEFT_SCHOOL
+  RUN_FINISHED
+}
+
+enum SyncOperationType {
+  ATTENDANCE
+  ABSENCE
+}
+
+enum SyncOperationStatus {
+  APPLIED
+  REJECTED
+}
+
+model User {
+  id           String         @id @default(cuid())
+  phone        String         @unique
+  name         String
+  passwordHash String
+  role         UserRole
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  driver       Driver?
+  guardian     Guardian?
+  sessions     Session[]
+  notifications Notification[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Driver {
+  id        String        @id @default(cuid())
+  userId    String        @unique
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicles  Vehicle[]
+  runs      ScheduleRun[]
+}
+
+model Guardian {
+  id        String             @id @default(cuid())
+  userId    String             @unique
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  students  StudentGuardian[]
+  absences  AbsenceRequest[]
+}
+
+model School {
+  id        String    @id @default(cuid())
+  name      String
+  address   String
+  latitude  Decimal?  @db.Decimal(9, 6)
+  longitude Decimal?  @db.Decimal(9, 6)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  students  Student[]
+  routes    Route[]
+}
+
+model Vehicle {
+  id          String   @id @default(cuid())
+  plateNumber String   @unique
+  label       String
+  capacity    Int
+  driverId    String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  driver      Driver   @relation(fields: [driverId], references: [id])
+  routes      Route[]
+}
+
+model Student {
+  id                    String                   @id @default(cuid())
+  prefix                String
+  firstName             String
+  lastName              String
+  nickname              String
+  schoolId              String
+  emergencyContactName  String
+  emergencyContactPhone String
+  allergyNote           String?
+  active                Boolean                  @default(true)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  school                School                   @relation(fields: [schoolId], references: [id])
+  guardians             StudentGuardian[]
+  assignments           StudentRouteAssignment[]
+  runStates             StudentRunState[]
+  events                AttendanceEvent[]
+  absences              AbsenceRequest[]
+  invoices              Invoice[]
+}
+
+model StudentGuardian {
+  studentId    String
+  guardianId   String
+  relationship String
+  isPrimary    Boolean  @default(false)
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardian     Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, guardianId])
+}
+
+model Route {
+  id          String                   @id @default(cuid())
+  name        String
+  schoolId    String
+  vehicleId   String
+  active      Boolean                  @default(true)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  school      School                   @relation(fields: [schoolId], references: [id])
+  vehicle     Vehicle                  @relation(fields: [vehicleId], references: [id])
+  stops       RouteStop[]
+  schedules   Schedule[]
+  assignments StudentRouteAssignment[]
+}
+
+model RouteStop {
+  id                 String                   @id @default(cuid())
+  routeId            String
+  name               String
+  sequence           Int
+  address            String
+  latitude           Decimal?                 @db.Decimal(9, 6)
+  longitude          Decimal?                 @db.Decimal(9, 6)
+  route              Route                    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  pickupAssignments  StudentRouteAssignment[] @relation("PickupStop")
+  dropoffAssignments StudentRouteAssignment[] @relation("DropoffStop")
+
+  @@unique([routeId, sequence])
+}
+
+model StudentRouteAssignment {
+  id            String    @id @default(cuid())
+  studentId     String
+  routeId       String
+  pickupStopId  String
+  dropoffStopId String
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  student       Student   @relation(fields: [studentId], references: [id])
+  route         Route     @relation(fields: [routeId], references: [id])
+  pickupStop    RouteStop @relation("PickupStop", fields: [pickupStopId], references: [id])
+  dropoffStop   RouteStop @relation("DropoffStop", fields: [dropoffStopId], references: [id])
+
+  @@unique([studentId, routeId])
+}
+
+model Schedule {
+  id               String      @id @default(cuid())
+  routeId          String
+  period           RunPeriod
+  dayOfWeek        Int
+  plannedStartTime String
+  active           Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  route            Route       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  runs             ScheduleRun[]
+
+  @@unique([routeId, period, dayOfWeek])
+}
+
+model ScheduleRun {
+  id          String            @id @default(cuid())
+  scheduleId  String
+  serviceDate DateTime          @db.Date
+  status      RunStatus         @default(PLANNED)
+  driverId    String
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  schedule    Schedule          @relation(fields: [scheduleId], references: [id])
+  driver      Driver            @relation(fields: [driverId], references: [id])
+  states      StudentRunState[]
+  events      AttendanceEvent[]
+  checkpoints RunCheckpoint[]
+
+  @@unique([scheduleId, serviceDate])
+  @@index([serviceDate])
+}
+
+model StudentRunState {
+  id                    String           @id @default(cuid())
+  runId                 String
+  studentId             String
+  status                StudentRunStatus @default(WAITING)
+  alternateReceiverName String?
+  updatedAt             DateTime         @updatedAt
+  run                   ScheduleRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  student               Student          @relation(fields: [studentId], references: [id])
+
+  @@unique([runId, studentId])
+}
+
+model AttendanceEvent {
+  id                    String              @id @default(cuid())
+  runId                 String
+  studentId             String
+  eventType             AttendanceEventType
+  idempotencyKey        String              @unique
+  note                  String?
+  alternateReceiverName String?
+  previousStatus        StudentRunStatus?
+  nextStatus            StudentRunStatus?
+  recordedByUserId      String
+  recordedAt            DateTime            @default(now())
+  clientRecordedAt      DateTime?
+  run                   ScheduleRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  student               Student             @relation(fields: [studentId], references: [id])
+
+  @@index([runId, studentId])
+}
+
+model AbsenceRequest {
+  id              String        @id @default(cuid())
+  studentId       String
+  guardianId      String
+  startDate       DateTime      @db.Date
+  endDate         DateTime      @db.Date
+  reason          String
+  affectsMorning  Boolean       @default(true)
+  affectsEvening  Boolean       @default(true)
+  status          AbsenceStatus @default(SUBMITTED)
+  idempotencyKey  String        @unique
+  createdByUserId String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  student         Student       @relation(fields: [studentId], references: [id])
+  guardian        Guardian      @relation(fields: [guardianId], references: [id])
+
+  @@index([studentId, startDate, endDate])
+}
+
+model Notification {
+  id               String                 @id @default(cuid())
+  recipientUserId  String
+  studentId        String?
+  type             String
+  title            String
+  body             String
+  channel          NotificationChannel
+  delivery         NotificationDelivery
+  pushDelivery     NotificationDelivery   @default(NOT_CONFIGURED)
+  sourceEventId    String?
+  createdAt        DateTime               @default(now())
+  deliveredAt      DateTime?
+  lastError        String?
+  recipient        User                   @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([recipientUserId, createdAt])
+}
+
+model Invoice {
+  id           String        @id @default(cuid())
+  studentId    String
+  yearMonth    String
+  amountSatang Int
+  status       InvoiceStatus @default(UNPAID)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  student      Student       @relation(fields: [studentId], references: [id])
+  payments     Payment[]
+
+  @@unique([studentId, yearMonth])
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  invoiceId        String
+  amountSatang     Int
+  method           PaymentMethod
+  paidAt           DateTime
+  recordedByUserId String
+  note             String?
+  idempotencyKey   String        @unique
+  createdAt        DateTime      @default(now())
+  invoice          Invoice       @relation(fields: [invoiceId], references: [id])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  action       String
+  entityType   String
+  entityId     String
+  previousJson Json?
+  nextJson     Json?
+  createdAt    DateTime @default(now())
+  actor        User?    @relation(fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model RunCheckpoint {
+  id              String         @id @default(cuid())
+  runId           String
+  kind            CheckpointKind
+  passed          Boolean
+  missingJson     Json
+  checkedByUserId String
+  checkedAt       DateTime       @default(now())
+  run             ScheduleRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, kind])
+}
+
+model SyncInbox {
+  id              String              @id @default(cuid())
+  userId          String
+  idempotencyKey  String              @unique
+  operationType   SyncOperationType
+  payload         Json
+  status          SyncOperationStatus
+  result          Json?
+  errorCode       String?
+  clientCreatedAt DateTime?
+  createdAt       DateTime            @default(now())
+  appliedAt       DateTime?
+}
